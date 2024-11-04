@@ -1,0 +1,105 @@
+name: Sync with Original and Modify
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs every day at midnight (adjust as needed)
+  workflow_dispatch: # To allow manual triggering of the action
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the code from your forked repository
+      - name: Check out forked repository
+        uses: actions/checkout@v4.1.1
+        with:
+          token: ${{ secrets.WORKFLOW_TOKEN }}
+
+      # Step 2: Fetch the latest commit hash from upstream repository
+      - name: Fetch latest commit hash from upstream
+        run: |
+          git remote add upstream https://github.com/home-assistant/core.git
+          git fetch upstream
+          git rev-parse upstream/dev > upstream_commit.txt
+
+      # Step 3: Compare the last known commit from upstream stored in .github/env-data/last_commit.txt
+      - name: Compare upstream commit with last known commit
+        id: check_commit
+        run: |
+          mkdir -p .github/data
+          if [ ! -f .github/env-data/last_commit.txt ]; then
+            echo "No last_commit.txt found, creating a new one."
+            echo "0000000000000000000000000000000000000000" > .github/env-data/last_commit.txt
+          fi
+
+          upstream_commit=$(cat upstream_commit.txt)
+          last_commit=$(cat .github/env-data/last_commit.txt)
+
+          echo "Upstream commit: $upstream_commit"
+          echo "Last known commit: $last_commit"
+
+          if [ "$upstream_commit" = "$last_commit" ]; then
+            echo "No new changes detected."
+            echo "changes_detected=false" >> $GITHUB_ENV
+          else
+            echo "New changes detected."
+            echo "changes_detected=true" >> $GITHUB_ENV
+            echo "upstream_commit=$upstream_commit" >> $GITHUB_ENV
+          fi
+
+      # Step 4: Backup the workflow file and patch before syncing
+      - name: Backup workflow and patch files
+        if: env.changes_detected == 'true'
+        run: |
+          mkdir -p backup
+          cp .github/workflows/apply_patch.yml backup/apply_patch.yml
+          cp .github/patches/wording_update.patch backup/wording_update.patch
+
+      # Step 5: Set up original repository as upstream and hard reset
+      - name: Set up original repository as upstream and hard reset
+        if: env.changes_detected == 'true'
+        run: |
+          git checkout dev
+          git reset --hard upstream/dev
+
+      # Step 6: Restore the workflow and patch files
+      - name: Restore workflow and patch files
+        if: env.changes_detected == 'true'
+        run: |
+          mkdir -p .github/workflows
+          mkdir -p .github/patches
+          cp backup/apply_patch.yml .github/workflows/apply_patch.yml
+          cp backup/wording_update.patch .github/patches/wording_update.patch
+
+      # Step 7: Clean up the backup directory before applying the patch
+      - name: Clean up backup
+        if: env.changes_detected == 'true'
+        run: |
+          rm -rf backup
+
+      # Step 8: Apply the patch
+      - name: Apply patch
+        if: env.changes_detected == 'true'
+        run: |
+          git apply .github/patches/wording_update.patch
+
+      # Step 9: Commit and force push changes
+      - name: Commit and force push changes
+        if: env.changes_detected == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "Sync and apply wording update patch"
+          git push origin dev --force
+
+      # Step 10: Update last_commit.txt with the new upstream commit hash
+      - name: Update last_commit.txt
+        if: env.changes_detected == 'true'
+        run: |
+          mkdir -p .github/data
+          echo "$upstream_commit" > .github/env-data/last_commit.txt
+          git add .github/env-data/last_commit.txt
+          git commit -m "Update last_commit.txt"
+          git push origin dev --force
