@@ -1,0 +1,156 @@
+name: Sync with Original and Modify
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs every day at midnight (adjust as needed)
+  workflow_dispatch: # To allow manual triggering of the action
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
+
+    steps:
+      # Step 1: Check out the code from your forked repository
+      - name: Check out forked repository
+        uses: actions/checkout@v4.1.1
+        with:
+          token: ${{ secrets.WORKFLOW_TOKEN }}
+
+      # Step 2: Fetch the latest commit hash from upstream repository
+      - name: Fetch latest commit hash from upstream
+        run: |
+          git remote add upstream https://github.com/home-assistant/core.git
+          git fetch upstream
+          git rev-parse upstream/dev > upstream_commit.txt
+
+      # Step 3: Compare the last known commit from upstream stored in .github/env-data/last_commit.txt
+      - name: Compare upstream commit with last known commit
+        id: check_commit
+        run: |
+          mkdir -p .github/data
+          if [ ! -f .github/env-data/last_commit.txt ]; then
+            echo "No last_commit.txt found, creating a new one."
+            echo "0000000000000000000000000000000000000000" > .github/env-data/last_commit.txt
+          fi
+
+          upstream_commit=$(cat upstream_commit.txt)
+          last_commit=$(cat .github/env-data/last_commit.txt)
+
+          echo "Upstream commit: $upstream_commit"
+          echo "Last known commit: $last_commit"
+
+          if [ "$upstream_commit" = "$last_commit" ]; then
+            echo "No new changes detected."
+            echo "changes_detected=false" >> $GITHUB_ENV
+          else
+            echo "New changes detected."
+            echo "changes_detected=true" >> $GITHUB_ENV
+            echo "upstream_commit=$upstream_commit" >> $GITHUB_ENV
+          fi
+
+      # Step 4: Backup the workflow file and patch before syncing
+      - name: Backup workflow and patch files
+        if: env.changes_detected == 'true'
+        run: |
+          mkdir -p backup
+          cp .github/workflows/apply_patch.yml backup/apply_patch.yml
+          cp .github/patches/wording_update.patch backup/wording_update.patch
+
+      # Step 5: Set up original repository as upstream and hard reset
+      - name: Set up original repository as upstream and hard reset
+        if: env.changes_detected == 'true'
+        run: |
+          git checkout dev
+          git reset --hard upstream/dev
+
+      # Step 6: Restore the workflow and patch files
+      - name: Restore workflow and patch files
+        if: env.changes_detected == 'true'
+        run: |
+          mkdir -p .github/workflows
+          mkdir -p .github/patches
+          cp backup/apply_patch.yml .github/workflows/apply_patch.yml
+          cp backup/wording_update.patch .github/patches/wording_update.patch
+
+      # Step 7: Clean up the backup directory before applying the patch
+      - name: Clean up backup
+        if: env.changes_detected == 'true'
+        run: |
+          rm -rf backup
+
+      # Step 8: Apply patch
+      - name: Apply patch
+        if: env.changes_detected == 'true'
+        run: |
+          git apply .github/patches/wording_update.patch
+
+      # Step 8.2: Update last_commit.txt with the new upstream commit hash
+      - name: Update last_commit.txt
+        if: env.changes_detected == 'true'
+        run: |
+          mkdir -p .github/env-data
+          echo "$upstream_commit" > .github/env-data/last_commit.txt
+          git add .github/env-data/last_commit.txt
+      
+      # Step 9: Create a new branch, commit, and push changes
+      - name: Commit changes to new branch
+        if: env.changes_detected == 'true'
+        run: |
+          # Configure Git user
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Create a unique branch name
+          BRANCH_NAME="patch-$(date +%Y%m%d%H%M%S)"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+          # Create and switch to the new branch
+          git checkout -b "$BRANCH_NAME"
+
+          # Add and commit changes
+          git add .
+          git commit -m "Sync and apply wording update patch"
+
+          # Push changes to new branch
+          git push origin "$BRANCH_NAME"
+
+      # Step 10: for JSON parse
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # Step 11: Create pull request
+      - name: Create pull request via GitHub API
+        if: env.changes_detected == 'true'
+        env:
+          BRANCH_NAME: ${{ env.BRANCH_NAME }}
+          REVIEWER_NAME: "naimurhasan"
+        run: |
+          # Set up data for the PR request
+          PR_TITLE="Apply wording update patch"
+          PR_BODY="Automated PR to apply wording update patch."
+          BASE_BRANCH="dev"
+          HEAD_BRANCH="$BRANCH_NAME"
+          
+          # Create the pull request and capture the PR number
+          PR_RESPONSE=$(curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/pulls \
+            -d "{\"title\":\"${PR_TITLE}\", \"body\":\"${PR_BODY}\", \"head\":\"${HEAD_BRANCH}\", \"base\":\"${BASE_BRANCH}\"}")
+          
+          PR_NUMBER=$(echo "$PR_RESPONSE" | jq -r '.number')
+
+          # Check if PR number was successfully retrieved
+          if [[ "$PR_NUMBER" == "null" ]]; then
+            echo "Failed to create pull request."
+            exit 1
+          fi
+
+          # Request a review from the specified reviewer
+          curl -s -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER/requested_reviewers \
+            -d "{\"reviewers\":[\"${REVIEWER_NAME}\"]}"
