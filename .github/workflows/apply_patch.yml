@@ -127,7 +127,7 @@ jobs:
         if: env.changes_detected == 'true'
         env:
           BRANCH_NAME: ${{ env.BRANCH_NAME }}
-          REVIEWER_NAME: "naimurhasan"
+          REVIEWER_NAME: "fuadnafiz98"
         run: |
           # Set up data for the PR request
           PR_TITLE="Apply wording update patch"
