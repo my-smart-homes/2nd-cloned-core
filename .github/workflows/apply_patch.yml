@@ -31,17 +31,18 @@ jobs:
       - name: Compare upstream commit with last known commit
         id: check_commit
         run: |
-          # Ensure the directory exists
-          mkdir -p .github/env-data
-          # Create the file if it doesn't exist
+          mkdir -p .github/data
           if [ ! -f .github/env-data/last_commit.txt ]; then
             echo "No last_commit.txt found, creating a new one."
             echo "0000000000000000000000000000000000000000" > .github/env-data/last_commit.txt
           fi
+
           upstream_commit=$(cat upstream_commit.txt)
           last_commit=$(cat .github/env-data/last_commit.txt)
+
           echo "Upstream commit: $upstream_commit"
           echo "Last known commit: $last_commit"
+
           if [ "$upstream_commit" = "$last_commit" ]; then
             echo "No new changes detected."
             echo "changes_detected=false" >> $GITHUB_ENV
@@ -50,7 +51,6 @@ jobs:
             echo "changes_detected=true" >> $GITHUB_ENV
             echo "upstream_commit=$upstream_commit" >> $GITHUB_ENV
           fi
-
 
       # Step 4: Backup the workflow file and patch before syncing
       - name: Backup workflow and patch files
@@ -92,7 +92,7 @@ jobs:
       - name: Update last_commit.txt
         if: env.changes_detected == 'true'
         run: |
-          mkdir -p .github/data
+          mkdir -p .github/env-data
           echo "$upstream_commit" > .github/env-data/last_commit.txt
           git add .github/env-data/last_commit.txt
       
