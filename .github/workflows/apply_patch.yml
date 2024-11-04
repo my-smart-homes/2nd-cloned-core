@@ -27,18 +27,18 @@ jobs:
           git fetch upstream
           git rev-parse upstream/dev > upstream_commit.txt
 
-      # Step 3: Compare the last known commit from upstream stored in .github/data/last_commit.txt
+      # Step 3: Compare the last known commit from upstream stored in .github/env-data/last_commit.txt
       - name: Compare upstream commit with last known commit
         id: check_commit
         run: |
           mkdir -p .github/data
-          if [ ! -f .github/data/last_commit.txt ]; then
+          if [ ! -f .github/env-data/last_commit.txt ]; then
             echo "No last_commit.txt found, creating a new one."
-            echo "0000000000000000000000000000000000000000" > .github/data/last_commit.txt
+            echo "0000000000000000000000000000000000000000" > .github/env-data/last_commit.txt
           fi
 
           upstream_commit=$(cat upstream_commit.txt)
-          last_commit=$(cat .github/data/last_commit.txt)
+          last_commit=$(cat .github/env-data/last_commit.txt)
 
           echo "Upstream commit: $upstream_commit"
           echo "Last known commit: $last_commit"
@@ -93,8 +93,8 @@ jobs:
         if: env.changes_detected == 'true'
         run: |
           mkdir -p .github/data
-          echo "$upstream_commit" > .github/data/last_commit.txt
-          git add .github/data/last_commit.txt
+          echo "$upstream_commit" > .github/env-data/last_commit.txt
+          git add .github/env-data/last_commit.txt
       
       # Step 9: Create a new branch, commit, and push changes
       - name: Commit changes to new branch
