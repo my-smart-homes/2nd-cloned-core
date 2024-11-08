@@ -10,7 +10,12 @@ from homeassistant.auth.providers import homeassistant as auth_ha
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import Unauthorized
+import aiohttp
 
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+import base64
 
 @callback
 def async_setup(hass: HomeAssistant) -> bool:
@@ -112,6 +117,12 @@ async def websocket_change_password(
     if (user := connection.user) is None:
         connection.send_error(msg["id"], "user_not_found", "User not found")  # type: ignore[unreachable]
         return
+    
+    if len(msg["new_password"]) < 6:
+        connection.send_error(
+            msg["id"], "invalid_password", "Password should be at least 6 characters"
+        )
+        return
 
     provider = auth_ha.async_get_provider(hass)
     username = None
@@ -136,6 +147,8 @@ async def websocket_change_password(
 
     await provider.async_change_password(username, msg["new_password"])
 
+    await sync_password_with_firebase(username, msg["current_password"], msg["new_password"])
+    
     connection.send_result(msg["id"])
 
 
@@ -220,3 +233,23 @@ async def websocket_admin_change_username(
 
     await provider.async_change_username(found_credential, msg["username"])
     connection.send_result(msg["id"])
+
+
+async def sync_password_with_firebase(email: str, current_password: str, new_password: str) -> None:
+    """Sync password change with Firebase asynchronously."""
+    url = 'https://updateuserpassword-jrskleaqea-uc.a.run.app'
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "email": email,
+        "currentPassword": current_password,
+        "newPassword": new_password
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=data) as response:
+            if response.status != 200:
+                # Log or handle error as needed
+                print("Failed to sync password with Firebase:", await response.text())
+            else:
+                print("Password synced with Firebase successfully.")
+
