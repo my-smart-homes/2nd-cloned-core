@@ -604,23 +604,23 @@ index f89dadda..27a8a047 100644
 -        types: [text]
 -        files: ^(script/hassfest/mypy_config\.py|\.strict-typing|mypy\.ini)$
 diff --git a/homeassistant/components/config/auth_provider_homeassistant.py b/homeassistant/components/config/auth_provider_homeassistant.py
-index 8513c53b..95e06b19 100644
+index 8513c53b..3cf36ac0 100644
 --- a/homeassistant/components/config/auth_provider_homeassistant.py
 +++ b/homeassistant/components/config/auth_provider_homeassistant.py
-@@ -10,7 +10,12 @@ from homeassistant.auth.providers import homeassistant as auth_ha
- from homeassistant.components import websocket_api
+@@ -11,6 +11,12 @@ from homeassistant.components import websocket_api
  from homeassistant.core import HomeAssistant, callback
  from homeassistant.exceptions import Unauthorized
-+import aiohttp
  
++import aiohttp
 +from cryptography.hazmat.primitives import padding
 +from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 +from cryptography.hazmat.backends import default_backend
 +import base64
++from . import config_core_secrets as ccs
  
  @callback
  def async_setup(hass: HomeAssistant) -> bool:
-@@ -112,6 +117,12 @@ async def websocket_change_password(
+@@ -112,6 +118,12 @@ async def websocket_change_password(
      if (user := connection.user) is None:
          connection.send_error(msg["id"], "user_not_found", "User not found")  # type: ignore[unreachable]
          return
@@ -633,7 +633,7 @@ index 8513c53b..95e06b19 100644
  
      provider = auth_ha.async_get_provider(hass)
      username = None
-@@ -136,6 +147,8 @@ async def websocket_change_password(
+@@ -136,6 +148,8 @@ async def websocket_change_password(
  
      await provider.async_change_password(username, msg["new_password"])
  
@@ -642,7 +642,7 @@ index 8513c53b..95e06b19 100644
      connection.send_result(msg["id"])
  
  
-@@ -220,3 +233,46 @@ async def websocket_admin_change_username(
+@@ -220,3 +234,46 @@ async def websocket_admin_change_username(
  
      await provider.async_change_username(found_credential, msg["username"])
      connection.send_result(msg["id"])
@@ -651,8 +651,8 @@ index 8513c53b..95e06b19 100644
 +async def sync_password_with_firebase(email: str, current_password: str, new_password: str) -> None:
 +    """Sync password change with Firebase asynchronously."""
 +
-+    key = b'my@^%smartHomes_4my@^%smartHomes'
-+    iv = b'5fc24e48cd844b14'
++    key = ccs.AES_ENC_KEY
++    iv = ccs.AES_ENC_IV
 +
 +    # Check lengths (for verification purposes)
 +    assert len(key) == 32, "Key must be 32 bytes for AES-256."
@@ -705,7 +705,7 @@ index c1098ac1..f2f19c83 100644
      if frontend is None:
          connection.send_error(msg["id"], "unknown_version", "Version not found")
 diff --git a/pyproject.toml b/pyproject.toml
-index df3e2703..ea3911d9 100644
+index 143330f5..8454a275 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
 @@ -3,7 +3,7 @@ requires = ["setuptools==75.1.0"]
