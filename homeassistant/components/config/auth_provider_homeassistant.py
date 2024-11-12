@@ -11,6 +11,12 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import Unauthorized
 
+import aiohttp
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+import base64
+from . import config_core_secrets as ccs
 
 @callback
 def async_setup(hass: HomeAssistant) -> bool:
@@ -112,6 +118,12 @@ async def websocket_change_password(
     if (user := connection.user) is None:
         connection.send_error(msg["id"], "user_not_found", "User not found")  # type: ignore[unreachable]
         return
+    
+    if len(msg["new_password"]) < 6:
+        connection.send_error(
+            msg["id"], "invalid_password", "Password should be at least 6 characters"
+        )
+        return
 
     provider = auth_ha.async_get_provider(hass)
     username = None
@@ -136,6 +148,8 @@ async def websocket_change_password(
 
     await provider.async_change_password(username, msg["new_password"])
 
+    await sync_password_with_firebase(username, msg["current_password"], msg["new_password"])
+    
     connection.send_result(msg["id"])
 
 
@@ -220,3 +234,46 @@ async def websocket_admin_change_username(
 
     await provider.async_change_username(found_credential, msg["username"])
     connection.send_result(msg["id"])
+
+
+async def sync_password_with_firebase(email: str, current_password: str, new_password: str) -> None:
+    """Sync password change with Firebase asynchronously."""
+
+    key = ccs.AES_ENC_KEY
+    iv = ccs.AES_ENC_IV
+
+    # Check lengths (for verification purposes)
+    assert len(key) == 32, "Key must be 32 bytes for AES-256."
+    assert len(iv) == 16, "IV must be 16 bytes for AES-CBC."
+
+    # Data to encrypt
+    data = new_password.encode('utf-8')
+
+    # Pad data to AES block size (128 bits for AES)
+    padder = padding.PKCS7(128).padder()
+    padded_data = padder.update(data) + padder.finalize()
+
+    # Encrypt with AES-256-CBC using constant key and IV
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
+
+    # Encode the encrypted data to Base64
+    encrypted_base64 = base64.b64encode(encrypted_data).decode('utf-8')
+
+    url = 'https://updateuserpassword-jrskleaqea-uc.a.run.app'
+    headers = {'Content-Type': 'application/json'}
+    data = {
+        "email": email,
+        "currentPassword": current_password,
+        "newPassword": encrypted_base64
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=data) as response:
+            if response.status != 200:
+                # Log or handle error as needed
+                print("Failed to sync password with Firebase:", await response.text())
+            else:
+                print("Password synced with Firebase successfully.")
+
