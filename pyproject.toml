@@ -3,7 +3,7 @@ requires = ["setuptools==75.1.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name        = "homeassistant"
+name        = "my-smart-homes"
 version     = "2024.12.0.dev0"
 license     = {text = "Apache-2.0"}
 description = "Open-source home automation platform running on Python 3."
